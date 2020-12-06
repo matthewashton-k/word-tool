@@ -58,8 +58,11 @@ impl State for MainViewState {
                 match action {
                     Action::Search => {
                         use crate::consts::WORDLIST;
-                        let query = ctx.get_widget(self.entities.query.unwrap()).clone::<String16>("text");
-                        let matches = match search(&query.to_string()[..], WORDLIST) {
+                        let mut query = ctx.get_widget(self.entities.query.unwrap()).clone::<String16>("text").to_string();
+                        query = query.to_uppercase();
+                        query = query.replace("*", "[A-Z]*");
+                        println!("your query: {}", &query);
+                        let matches = match search(&query[..], WORDLIST) {
                             Ok(m) => {
                                 m
                             }
@@ -75,6 +78,12 @@ impl State for MainViewState {
                         };
                         for m in matches {
                             findings.words.push(m.1);
+                        }
+                        {
+                            for x in findings.clone().words {
+                                main_view(ctx.widget()).list_mut()
+                                .push(x);
+                            }
                         }
                         self.popup_action(PopupAction::ShowFindings(findings));
                         self.action = None;
@@ -232,23 +241,6 @@ pub fn show_findings(target: Entity, findings: &Findings, ctx: &mut BuildContext
             Stack::new()
                 .spacing(8.0)
                 .child(
-                    ItemsWidget::new()
-                        .count(findings.words.len())
-                        .height(200.0)
-                        .width(300.0)
-                        .margin(8.0)
-                        .h_align("center")
-                        .items_builder(
-                            move |bc, index| {
-                                let fetched = &bc.get_widget(target).clone::<Vec<String>>("list")[index];
-                                TextBlock::new()
-                                    .text(format!("{}: {}", index, fetched))
-                                .build(bc)
-                            }
-                        )
-                    .build(ctx)
-                )
-                .child(
                     Button::new()
                     .text("Close")
                     .v_align("bottom")
@@ -262,6 +254,31 @@ pub fn show_findings(target: Entity, findings: &Findings, ctx: &mut BuildContext
                     )
                     .build(ctx)
                 )
+                .child(
+                    ScrollViewer::new()
+                    .padding(8.0)
+                    .max_height(100)
+                    .child(
+                        ItemsWidget::new()
+                            .count(findings.words.len())
+                            .height(200.0)
+                            .width(300.0)
+                            .margin(8.0)
+                            .h_align("center")
+                            .items_builder(
+                                move |bc, index| {
+                                    let fetched = &bc.get_widget(target).clone::<Vec<String>>("list")[index];
+                                    TextBlock::new()
+                                        .text(format!("{}: {}", index, fetched))
+                                    .build(bc)
+                                }
+                            )
+                        .build(ctx)
+                    )
+                    .build(ctx)
+
+                )
+
             .build(ctx)
         )
     .build(ctx)
