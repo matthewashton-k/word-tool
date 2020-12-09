@@ -19,6 +19,7 @@ impl Template for MainView {
             Stack::new()
                 .margin(8)
                 .id("MAIN_STACK")
+
                 .child(
                     TextBox::new()
                         .id("SEARCH_QUERY")

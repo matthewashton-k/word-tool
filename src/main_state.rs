@@ -1,6 +1,9 @@
 use orbtk::prelude::*;
 use std::error::Error;
 
+
+use std::fs::File;use std::fs::OpenOptions;use std::io::Write;
+use orbtk::prelude::ScrollViewerMode;
 use grep::matcher::Matcher;
 use grep::regex::RegexMatcher;
 use grep::searcher::{Searcher, sinks::UTF8};
@@ -18,23 +21,21 @@ pub struct MainViewState {
     popup: Option<Entity>,
     entities: MainStateEntities
 }
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug,  Clone)]
 pub enum Action {
-    Search
+    Search,
 }
 
-#[derive(Debug, Clone,)]
+#[derive(Debug, Clone)]
 pub enum PopupAction {
     ShowError(String),
     ShowMessage(String),
     ShowFindings(Findings),
+    OverFlow(Findings),
     Close,
 }
-impl Default for PopupAction {
-    fn default() -> PopupAction {
-        PopupAction::Close
-    }
-}
+
+
 
 #[derive(Default)]
 pub struct MainStateEntities {
@@ -54,13 +55,19 @@ impl MainViewState {
 impl State for MainViewState {
     fn update(&mut self, registry: &mut Registry, ctx: &mut Context) {
         loop{
-            if let Some(action) = &self.action{
+            if let Some(action) = self.action.clone(){
                 match action {
                     Action::Search => {
                         use crate::consts::WORDLIST;
                         let mut query = ctx.get_widget(self.entities.query.unwrap()).clone::<String16>("text").to_string();
+                        if query.len() < 1 {
+                            self.popup_action(PopupAction::ShowError("type in a query".to_string()));
+                            break;
+                        }
                         query = query.to_uppercase();
                         query = query.replace("*", "[A-Z]*");
+                        query.insert_str(0, r"\b");
+                        query.insert_str(query.len(), r"\b");
                         println!("your query: {}", &query);
                         let matches = match search(&query[..], WORDLIST) {
                             Ok(m) => {
@@ -76,18 +83,38 @@ impl State for MainViewState {
                             count: *count as u128,
                             words: vec![]
                         };
+                        println!("matches: {:?}", findings);
                         for m in matches {
+                            //println!("{:?}", m.1);
                             findings.words.push(m.1);
                         }
+                        println!("matches: {:?}", findings);
                         {
                             for x in findings.clone().words {
                                 main_view(ctx.widget()).list_mut()
                                 .push(x);
                             }
                         }
-                        self.popup_action(PopupAction::ShowFindings(findings));
-                        self.action = None;
-                        break;
+
+
+                        match OpenOptions::new().write(true).create(true).append(false).open("Downloads/matches.txt") {
+                            Ok(mut f) => {
+                                match f.write_all(format!("matches: {:?}", findings.words).as_bytes()) {
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        self.popup_action(PopupAction::ShowError(format!("Error: {}", e)));
+                                        break;
+                                    }
+                                }
+
+                                self.popup_action(PopupAction::OverFlow(findings));
+                            }
+                            Err(e) => {
+                                self.popup_action(PopupAction::ShowError(format!("Cant save matches: {}", e)));
+                                break;
+                            }
+
+                        };
                     }
                 }
             }
@@ -95,7 +122,7 @@ impl State for MainViewState {
         break;}
 
         ////////////popup actions ////////////
-        if let Some(action) = &self.popup_action {
+        if let Some(action) = self.popup_action.clone() {
             match action {
                 PopupAction::ShowError(s) => {
                     println!("[WARN] Showing an error message.");
@@ -122,13 +149,13 @@ impl State for MainViewState {
                     self.action = None;
                 }
                 PopupAction::ShowFindings(findings) => {
-
-                    {
-                        for x in findings.clone().words {
-                            main_view(ctx.widget()).list_mut()
-                            .push(x);
-                        }
-                    }
+                    //
+                    // {
+                    //     for x in findings.clone().words {
+                    //         main_view(ctx.widget()).list_mut()
+                    //         .push(x);
+                    //     }
+                    // }
                     let container = ctx.entity_of_child(MAIN_STACK).unwrap();
                     let current_entity = ctx.entity;
                     let build_context = &mut ctx.build_context();
@@ -139,6 +166,51 @@ impl State for MainViewState {
                     self.popup = Some(popup);
                     self.popup_action = None;
                     self.action = None;
+                }
+
+                PopupAction::OverFlow(findings) =>  {
+                    println!("the findings are {:?}", findings);
+
+                    let findings = Rc::new(findings);
+                    ctx.show_window(move |ctx| {
+                        let findings_clone = Rc::clone(&findings);
+                        Window::new()
+                        .title("Matches")
+                        .resizeable(true)
+                        .position((120.0, 120.0))
+                        .size(400.0, 400.0)
+                        .child(
+                            Stack::new()
+                                .spacing(8.0)
+                                .margin(8.0)
+                                .child(
+                                    Container::new()
+                                        .padding(8.0)
+                                        .border_radius(5.0)
+                                        .background(Brush::from("#181b1f"))
+                                    .child(
+                                        TextBlock::new()
+                                            .text(format!("Matches found: {}", findings.count))
+                                        .build(ctx)
+                                    )
+                                    .build(ctx)
+                                )
+                                .child(
+                                    Container::new()
+                                    .border_radius(8.0)
+                                    .background(Brush::from("#181b1f"))
+                                        .child(
+                                            TextBlock::new().text(format!("Matches saved to Downloads in matches.txt")).build(ctx)
+                                        )
+                                    .build(ctx)
+
+                                )
+
+                                .build(ctx)
+
+                            )
+                        .build(ctx)
+                    });
                 }
 
                 PopupAction::Close => {
@@ -170,7 +242,7 @@ pub enum WidgetState {
     MainViewState,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,)]
 pub struct Findings {
     count: u128,
     words: Vec<String>
@@ -255,27 +327,30 @@ pub fn show_findings(target: Entity, findings: &Findings, ctx: &mut BuildContext
                     .build(ctx)
                 )
                 .child(
-                    ScrollViewer::new()
-                    .padding(8.0)
-                    .max_height(100)
-                    .child(
-                        ItemsWidget::new()
+                    // ScrollViewer::new()
+                    // .padding(8.0)
+                    // .height(200)
+                    // .child(
+                        ListView::new()
                             .count(findings.words.len())
                             .height(200.0)
                             .width(300.0)
                             .margin(8.0)
+                            .enabled(true)
+                            .selection_mode(SelectionMode::None)
                             .h_align("center")
                             .items_builder(
                                 move |bc, index| {
                                     let fetched = &bc.get_widget(target).clone::<Vec<String>>("list")[index];
+                                    //println!("{}", fetched);
                                     TextBlock::new()
                                         .text(format!("{}: {}", index, fetched))
                                     .build(bc)
                                 }
                             )
                         .build(ctx)
-                    )
-                    .build(ctx)
+                    // )
+                    // .build(ctx)
 
                 )
 
@@ -285,7 +360,7 @@ pub fn show_findings(target: Entity, findings: &Findings, ctx: &mut BuildContext
 }
 
 
-fn search(pattern: &str, wordlist: &'static [u8]) -> Result<Vec<(u64, String)>, Box<Error>> {
+pub fn search(pattern: &str, wordlist: &'static [u8]) -> Result<Vec<(u64, String)>, Box<Error>> {
     let matcher = RegexMatcher::new_line_matcher(pattern)?;
     let mut matches: Vec<(u64, String)> = vec![];
     Searcher::new().search_slice(&matcher, wordlist, UTF8(|lnum, line| {
@@ -294,6 +369,6 @@ fn search(pattern: &str, wordlist: &'static [u8]) -> Result<Vec<(u64, String)>, 
         matches.push((lnum, line[mymatch].to_string()));
         Ok(true)
     }))?;
-    println!("matches:{:?}", matches);
+    //println!("matches:{:?}", matches);
     Ok(matches)
 }
