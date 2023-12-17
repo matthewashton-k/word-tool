@@ -1,3 +1,6 @@
+## Just a simple gui app I made a while back for helping with wordle challenges. 
+## The Orbtk dependency is now obsolete so I dont know if this will compile
+
 **build instructions**
 1. install rust from https://rustup.rs/
 
